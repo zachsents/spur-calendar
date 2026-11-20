@@ -292,6 +292,15 @@ export const insert = (calendar: Calendar, f: Fields, notify: boolean) =>
     (g) => toEvent(calendar, g),
   )
 
+/** An event from a line of text, as Google reads it ("Lunch with Robin tomorrow at noon"). Emails no one. */
+export const quickAdd = (calendar: Calendar, text: string) =>
+  Effect.map(
+    call(calendar.account, "POST", `${calendarPath(calendar.remote)}/events/quickAdd`, {
+      query: { text, sendUpdates: "none" },
+    }),
+    (g) => toEvent(calendar, g),
+  )
+
 export const patch = (
   calendar: Calendar,
   id: string,

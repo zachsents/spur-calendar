@@ -648,6 +648,29 @@ const make = (settings: Settings) =>
         return { write, event: made }
       })
 
+    /** An event from a line of text, read by Google, so only on a Google calendar; undone like create. */
+    const quickAdd = (input: { readonly text: string; readonly calendar?: string }) =>
+      Effect.gen(function* adding() {
+        const calendar = resolveCalendar(input.calendar)
+        if (calendar === null) {
+          return yield* Effect.fail(new Error(`No calendar ${input.calendar ?? ""} to write to`))
+        }
+        if (calendar.provider !== "google") {
+          return yield* Effect.fail(
+            new Error(
+              `${calendar.name} isn't a Google calendar: quick add needs one, create works anywhere`,
+            ),
+          )
+        }
+        let made = yield* google.quickAdd(calendar, input.text)
+        // Guests are create's, held for approval: any Google read from the text come off again, unemailed.
+        if (others(made).length > 0) {
+          made = yield* google.patch(calendar, made.id, { attendees: [] }, false)
+        }
+        const write = yield* logged("create", calendar, null, made, null)
+        return { write, event: made }
+      })
+
     const update = (input: {
       readonly id: string
       readonly fields: Fields
@@ -939,6 +962,7 @@ const make = (settings: Settings) =>
       leaving,
       travel,
       create,
+      quickAdd,
       update,
       cancel,
       rsvp,

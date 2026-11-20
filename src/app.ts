@@ -278,6 +278,24 @@ const create = tool(
     }),
 )
 
+const quickAdd = tool(
+  "quick_add",
+  {
+    description:
+      'Put an event on a Google calendar from a line of text, as Google reads it, like "Lunch at Cafe Rio tomorrow 12:30" (default calendar: the user\'s own Google one). Emails no one; for guests use create.',
+    input: Schema.Struct({ text: Schema.String, calendar: Schema.optionalKey(Schema.String) }),
+  },
+  (input) =>
+    Effect.gen(function* adding() {
+      const c = yield* Calendars
+      const r = yield* c.quickAdd({
+        text: input.text,
+        ...(input.calendar === undefined ? {} : { calendar: input.calendar }),
+      })
+      return { write: r.write, event: shown(r.event) }
+    }),
+)
+
 const updateInput = Schema.Struct({ id: Schema.String, ...fieldsInput, ...approved })
 
 const update = tool(
@@ -559,6 +577,7 @@ export const calendarApp = defineApp<Calendars>({
     conflicts,
     travel,
     create,
+    quickAdd,
     update,
     cancel,
     rsvp,
