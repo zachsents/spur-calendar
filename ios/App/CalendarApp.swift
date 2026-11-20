@@ -62,6 +62,10 @@ struct Item: Identifiable, Hashable {
 final class Model {
   let core = Core(app: "calendar")
   var path: [Route] = []
+  /// A new event's sheet is up.
+  var making = false
+  /// The event in front's Move sheet is up.
+  var moving = false
   private(set) var changes = 0
   /// The last write made here, for its Undo.
   var done: Done?
@@ -81,10 +85,18 @@ final class Model {
     if let link = UserDefaults.standard.string(forKey: "open"), let url = URL(string: link) { open(url: url) }
   }
 
-  /// `switch-calendar://event/<id>`; an id holds slashes, so it's the rest of the path.
+  /// `switch-calendar://event/<id>`, `switch-calendar://move/<id>`, `switch-calendar://new`; an id
+  /// holds slashes, so it's the rest of the path.
   func open(url: URL) {
     let id = url.path().dropFirst().removingPercentEncoding ?? ""
-    if url.host() == "event", !id.isEmpty { path = [.event(id)] }
+    switch url.host() {
+    case "event" where !id.isEmpty: path = [.event(id)]
+    case "move" where !id.isEmpty:
+      path = [.event(id)]
+      moving = true
+    case "new": making = true
+    default: break
+    }
   }
 
   /// A write's answer: done (with its Undo), or held until the user approves it.

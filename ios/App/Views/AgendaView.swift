@@ -5,7 +5,6 @@ struct AgendaView: View {
   let model: Model
   @State private var days: [(day: Date, items: [Item])] = []
   @State private var problem: String?
-  @State private var making = false
 
   var body: some View {
     TimelineView(.periodic(from: .now, by: 60)) { t in
@@ -32,14 +31,14 @@ struct AgendaView: View {
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Button {
-          making = true
+          model.making = true
         } label: {
           Image(systemName: "plus")
         }
         .accessibilityLabel("New event")
       }
     }
-    .sheet(isPresented: $making) {
+    .sheet(isPresented: Binding(get: { model.making }, set: { model.making = $0 })) {
       EventSheet(model: model, editing: nil)
         .presentationDetents([.large])
         .presentationCornerRadius(SIS.radius)
