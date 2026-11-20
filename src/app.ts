@@ -576,6 +576,12 @@ export const calendarApp = defineApp<Calendars>({
       surfaces: ["space"],
       resource: "ui://calendar/agenda",
       space: HOME,
+      size: {
+        aspect: "tall",
+        min: { cols: 3, rows: 4 },
+        preferred: { cols: 4, rows: 6 },
+        grows: true,
+      },
       tool: "agenda",
       refresh: [...changed, Next.type, StartingSoon.type],
       // Today's lines: the time, the live marks, the title. When today is done, the next one.
