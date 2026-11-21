@@ -505,7 +505,9 @@ const agenda = tool(
           })
         }
       }
-      return { day, rows, empty: rows.length === 0 ? "Clear" : "" }
+      // Nothing at all: only the empty word, no heading over it.
+      const empty = rows.length === 0
+      return { day: empty ? "" : day, rows, empty: empty ? "Clear" : "" }
     }),
 )
 
