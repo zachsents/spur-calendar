@@ -1,6 +1,6 @@
 # spur-calendar
 
-Every Google and Apple (EventKit) calendar in one, synced both ways: the providers stay the source of truth, every write can be undone, and anything that would email someone else waits for the user. Agenda, free time, conflicts, travel time and invites; an agenda widget in Home.
+Every Google calendar in one, synced both ways: Google stays the source of truth, every write can be undone, and anything that would email someone else waits for the user. Agenda, free time, conflicts and invites; an agenda widget.
 
 A [Switch](https://switch.ax) spur, built on [spur-kit](https://github.com/zachsents/spur-kit).
 
@@ -11,10 +11,8 @@ Ask Switch's agent to install `github:zachsents/spur-calendar`, or add it in the
 
 ## Setup
 
-Connect Google accounts in Switch (Connections). On a Mac it reads EventKit too, through a small
-Swift helper it builds on first use (needs `swiftc`). Settings, all optional, in
-`~/.switch/calendar.json`: `apple`, `home` (where travel starts), `calendar` (where new events go),
-`travel` (driving, walking or transit).
+Connect Google accounts in Switch (Connections). One setting, optional, in `~/.switch/calendar.json`:
+`calendar` (where new events go).
 
 ## Develop
 

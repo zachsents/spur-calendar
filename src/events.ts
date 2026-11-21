@@ -34,16 +34,10 @@ export const EventCancelled = defineEvent(
 /** Someone else's invite, waiting on the user's answer. */
 export const InviteReceived = defineEvent("calendar.invite.received", 1, Schema.Struct({ event }))
 
-const leave = {
-  /** When to leave, if there's somewhere to go. */
-  leaveAt: Schema.NullOr(Schema.Finite),
-  travelMinutes: Schema.NullOr(Schema.Finite),
-}
-
 export const StartingSoon = defineEvent(
   "calendar.starting_soon",
   1,
-  Schema.Struct({ event, minutes: Schema.Finite, ...leave }),
+  Schema.Struct({ event, minutes: Schema.Finite }),
 )
 
 /** Two events that hold the same time. */
@@ -53,7 +47,7 @@ export const Conflict = defineEvent(
   Schema.Struct({ events: Schema.Array(event) }),
 )
 
-/** The next meeting changed: what the iPhone's Live Activity shows. Null: nothing left today. */
+/** The next meeting changed. Null: nothing left today. */
 export const Next = defineEvent(
   "calendar.next",
   1,
@@ -65,7 +59,6 @@ export const Next = defineEvent(
         start: Schema.Finite,
         end: Schema.Finite,
         location: Schema.NullOr(Schema.String),
-        ...leave,
       }),
     ),
   }),

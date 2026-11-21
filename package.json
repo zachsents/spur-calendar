@@ -2,7 +2,7 @@
   "name": "spur-calendar",
   "version": "0.1.0",
   "private": true,
-  "description": "Every Google and Apple calendar in one, synced both ways, as a Switch spur.",
+  "description": "Every Google calendar in one, synced both ways, as a Switch spur.",
   "license": "MIT",
   "repository": "github:zachsents/spur-calendar",
   "type": "module",

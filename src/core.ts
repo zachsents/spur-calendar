@@ -1,7 +1,7 @@
 // The rest of Switch, reached the way an agent reaches it: the core's apps over MCP (`/apps`). What
-// Calendar asks of others: autonomy (expectations, action items), the brain (an item's answer),
-// contacts (who an attendee is) and the iPhone (a Live Activity). Each is optional: a missing app
-// or an unreachable core is null, and Calendar goes on without it.
+// Calendar asks of others: autonomy (action items), the brain (an item's answer) and contacts (who
+// an attendee is). Each is optional: a missing app or an unreachable core is null, and Calendar goes
+// on without it.
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import { Effect } from "effect"
 
@@ -61,13 +61,6 @@ export const googleAccounts = (scope: string) =>
 /** Asks the user to connect a Google account: an action item with a Connect button. */
 export const askForGoogle = callCore("connections_request", { provider: "google" })
 
-/** "X by T, else wake", in a space (Home unless told). */
-export const expect = (what: string, by: number, otherwise: string, space = "Home") =>
-  callCore("autonomy_expect", { space, what, by: new Date(by).toISOString(), otherwise })
-
-export const dropExpectation = (what: string, space = "Home") =>
-  callCore("autonomy_expect", { space, what, by: 0, drop: true })
-
 /** An action item, through the gate. */
 export const actionItem = (title: string, body: string, space = "Home") =>
   callCore("autonomy_action_item", { space, title, body })
@@ -99,27 +92,3 @@ export const people = (emails: readonly string[]) =>
         }
         return out
       })
-
-/** What the iPhone's Live Activity for the next meeting shows. */
-export interface NextUp {
-  readonly event: string
-  readonly title: string
-  readonly start: number
-  readonly end: number
-  readonly location: string | null
-  /** When to leave, if there's somewhere to go. */
-  readonly leaveAt: number | null
-  readonly travelMinutes: number | null
-}
-
-/**
- * The iPhone's Live Activity: started or updated with the next meeting, ended with null. The iPhone
- * spur's tool (`iphone_activity`) doesn't exist yet; this is the call it will answer.
- */
-export const liveActivity = (next: NextUp | null) =>
-  callCore(
-    "iphone_activity",
-    next === null
-      ? { kind: "next-meeting", end: true }
-      : { kind: "next-meeting", id: next.event, state: next },
-  )

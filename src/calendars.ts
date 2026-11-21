@@ -4,8 +4,6 @@
 import { Context, Effect, Layer, Schedule, Schema } from "effect"
 
 import { AppEvents } from "spur-kit"
-import { apple } from "./apple.ts"
-import type { Apple } from "./apple.ts"
 import * as core from "./core.ts"
 import {
   Conflict,
@@ -32,16 +30,11 @@ const TOLD_AHEAD = 60 * DAY
 /** A read reaches this far back; anything older is kept as it was. */
 const READ_BACK = 29 * DAY
 const SOON_MS = 10 * MINUTE
-const LEAVE_PAD_MIN = 5
 
 const hhmm = (ms: number) =>
   new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
-
-/** A place to drive to, not a link or a room code. */
-const isPlace = (s: string | null): s is string =>
-  s !== null && s.trim().length > 3 && !/^https?:|zoom\.us|meet\.google/iu.test(s.trim())
 
 /** Fields whose change is worth saying. */
 const watched = [
@@ -59,7 +52,7 @@ const watched = [
 const changesOf = (a: Event, b: Event) =>
   watched.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
 
-/** The same meeting on two calendars (an invite to both accounts, a Google calendar on the Mac). */
+/** The same meeting on two calendars (an invite to two accounts). */
 const sameKey = (e: Event) => `${e.ical ?? e.title.toLowerCase()}@${e.start}`
 
 const parseEvent: (json: string) => Event = Schema.decodeUnknownSync(Schema.fromJsonString(event))
@@ -100,9 +93,6 @@ const make = (settings: Settings) =>
     let googles: readonly string[] = []
     /** Asked the user to connect one already, this run. */
     let asked = false
-    const mac: Apple | null = settings.apple ? apple(settings.helper) : null
-    let appleAccess = "unknown"
-    let appleCheckedAt = 0
     /** Writes waiting to be told, by event id. */
     const writeOf = new Map<string, string>()
     let lastNext = ""
@@ -172,51 +162,6 @@ const make = (settings: Settings) =>
         return out
       })
 
-    const syncApple = (m: Apple) =>
-      Effect.gen(function* syncing() {
-        if (appleAccess !== "full" && Date.now() - appleCheckedAt > 10 * MINUTE) {
-          appleCheckedAt = Date.now()
-          appleAccess = yield* Effect.orElseSucceed(m.access, () => "unknown")
-        }
-        if (appleAccess !== "full") {
-          return [
-            {
-              calendar: "apple",
-              name: "Apple",
-              provider: "apple",
-              account: "",
-              events: 0,
-              error: `Calendar access ${appleAccess}`,
-            },
-          ]
-        }
-        const all = yield* m.calendars
-        // A Google account added to the Mac's Calendar is synced from Google already.
-        const connected = new Set(googles.map((a) => a.toLowerCase()))
-        const cals = all.filter((c) => !connected.has(c.account.toLowerCase()))
-        for (const c of cals) {
-          store.putCalendar(c)
-        }
-        for (const id of store
-          .calendars()
-          .filter((c) => c.provider === "apple" && !cals.some((x) => x.id === c.id))
-          .map((c) => c.id)) {
-          store.markGone(id)
-        }
-        const read = yield* m.read(cals)
-        for (const c of cals) {
-          const first = store.idsOf(c.id).length === 0
-          const delta = read.get(c.id)
-          if (delta !== undefined) {
-            apply(c, delta)
-          }
-          if (first) {
-            initial.add(c.id)
-          }
-        }
-        return cals.map(summary)
-      })
-
     const summary = (c: Calendar): Sync => ({
       calendar: c.id,
       name: c.name,
@@ -281,7 +226,6 @@ const make = (settings: Settings) =>
       }
       initial.clear()
       yield* conflicts
-      yield* expectations
     })
 
     // What's on: merged across calendars, the same meeting once
@@ -335,101 +279,7 @@ const make = (settings: Settings) =>
       }
     })
 
-    // Travel
-
-    const routes = new Map<string, { readonly minutes: number; readonly at: number } | null>()
-
-    const travel = (from: string, to: string, arrive: number | null) =>
-      Effect.gen(function* routing() {
-        if (mac === null) {
-          return null
-        }
-        const key = `${from}|${to}|${arrive === null ? "" : Math.floor(arrive / HOUR)}`
-        const had = routes.get(key)
-        if (had !== undefined && (had === null || Date.now() - had.at < 30 * MINUTE)) {
-          return had?.minutes ?? null
-        }
-        const r = yield* Effect.result(mac.route(from, to, arrive, settings.travel))
-        const minutes = r._tag === "Success" ? r.success.minutes : null
-        routes.set(key, minutes === null ? null : { minutes, at: Date.now() })
-        return minutes
-      })
-
-    /** Where the user will be coming from: the last place before it that day, else home. */
-    const originFor = (e: Event) => {
-      const before = merged(e.start - 4 * HOUR, e.start).findLast(
-        (x) => holds(x) && x.end <= e.start && sameDay(x.start, e.start) && isPlace(x.location),
-      )
-      return before?.location ?? settings.home
-    }
-
-    const leaving = (e: Event) =>
-      Effect.gen(function* leavingFor() {
-        if (!isPlace(e.location)) {
-          return { leaveAt: null, travelMinutes: null }
-        }
-        const from = originFor(e)
-        if (from === null || from === e.location) {
-          return { leaveAt: null, travelMinutes: null }
-        }
-        const minutes = yield* travel(from, e.location, e.start)
-        return minutes === null
-          ? { leaveAt: null, travelMinutes: null }
-          : { leaveAt: e.start - (minutes + LEAVE_PAD_MIN) * MINUTE, travelMinutes: minutes }
-      })
-
-    // Expectations: "leave by 2:40", "the meeting starts"
-
-    const expectations = Effect.gen(function* expecting() {
-      const now = Date.now()
-      const want = new Map<string, { what: string; by: number; otherwise: string; event: string }>()
-      for (const e of merged(now, now + DAY).filter((x) => holds(x) && x.start > now)) {
-        if (others(e).length > 0) {
-          want.set(`${e.id}:start`, {
-            event: e.id,
-            what: `${e.title} starts at ${hhmm(e.start)}`,
-            by: e.start,
-            otherwise: `It's starting now${e.call === null ? "" : `: ${e.call}`}.`,
-          })
-        }
-        const l = yield* leaving(e)
-        if (l.leaveAt !== null && l.leaveAt > now) {
-          want.set(`${e.id}:leave`, {
-            event: e.id,
-            what: `Leave for ${e.title} by ${hhmm(l.leaveAt)}`,
-            by: l.leaveAt,
-            otherwise: `Tell the user to leave now: ${l.travelMinutes} min to ${e.location ?? "it"}.`,
-          })
-        }
-      }
-      for (const [key, w] of want) {
-        const had = store.expectedOf(key)
-        if (had !== null && had.what === w.what && had.by === w.by) {
-          continue
-        }
-        if (had !== null && had.what !== w.what) {
-          yield* core.dropExpectation(had.what)
-        }
-        const r = yield* core.expect(w.what, w.by, w.otherwise)
-        if (r !== null) {
-          store.setExpected(key, w.event, w.what, w.by)
-        }
-      }
-      // Ones whose event was cancelled, declined or moved away.
-      const open = store.db
-        .query<{ key: string; what: string; by: number }, []>("SELECT key, what, by FROM expected")
-        .all()
-      for (const x of open) {
-        if (!want.has(x.key) && x.by > now) {
-          yield* core.dropExpectation(x.what)
-          store.dropExpected(x.key)
-        } else if (x.by <= now) {
-          store.dropExpected(x.key)
-        }
-      }
-    })
-
-    // The clock: starting soon, and the next meeting for the iPhone
+    // The clock: starting soon, and the next meeting
 
     const tick = Effect.gen(function* ticking() {
       const now = Date.now()
@@ -437,17 +287,15 @@ const make = (settings: Settings) =>
       for (const e of upcoming.filter((x) => x.start - now <= SOON_MS)) {
         const s = store.get(e.id)
         if (s !== null && s.soonTold !== e.start) {
-          const l = yield* leaving(e)
           yield* emit(
-            StartingSoon.make({ event: e, minutes: Math.round((e.start - now) / MINUTE), ...l }),
+            StartingSoon.make({ event: e, minutes: Math.round((e.start - now) / MINUTE) }),
           )
           store.setSoonTold(e.id, e.start)
         }
       }
       const first = upcoming.find((e) => sameDay(e.start, now))
-      const l = first === undefined ? null : yield* leaving(first)
       const next =
-        first === undefined || l === null
+        first === undefined
           ? null
           : {
               event: first.id,
@@ -455,13 +303,11 @@ const make = (settings: Settings) =>
               start: first.start,
               end: first.end,
               location: first.location,
-              ...l,
             }
       const key = JSON.stringify(next)
       if (key !== lastNext) {
         lastNext = key
         yield* emit(Next.make({ next }))
-        yield* core.liveActivity(next)
       }
     })
 
@@ -493,21 +339,6 @@ const make = (settings: Settings) =>
           })
         }
       }
-      if (mac !== null) {
-        const r = yield* Effect.result(syncApple(mac))
-        if (r._tag === "Success") {
-          out.push(...r.success)
-        } else {
-          out.push({
-            calendar: "apple",
-            name: "Apple",
-            provider: "apple",
-            account: "",
-            events: 0,
-            error: r.failure.message,
-          })
-        }
-      }
       return out
     })
 
@@ -521,9 +352,7 @@ const make = (settings: Settings) =>
       const found =
         all.find((c) => c.id.toLowerCase() === want) ??
         all.find((c) => c.name.toLowerCase() === want) ??
-        (want === ""
-          ? all.find((c) => c.provider === "google" && c.primary && c.account === googles[0])
-          : undefined)
+        (want === "" ? all.find((c) => c.primary && c.account === googles[0]) : undefined)
       return found ?? null
     }
 
@@ -626,18 +455,11 @@ const make = (settings: Settings) =>
             guests,
           )
         }
-        let made: Event
-        if (calendar.provider === "google") {
-          made = yield* google.insert(
-            calendar,
-            { ...input.fields, attendees: guests, call: input.call === true },
-            guests.length > 0,
-          )
-        } else if (mac !== null && guests.length === 0) {
-          made = yield* mac.create(calendar, input.fields)
-        } else {
-          return yield* Effect.fail(new Error("Apple's calendars can't send invites from here"))
-        }
+        const made = yield* google.insert(
+          calendar,
+          { ...input.fields, attendees: guests, call: input.call === true },
+          guests.length > 0,
+        )
         const write = yield* logged(
           input.undoes === undefined ? "create" : "undo",
           calendar,
@@ -648,19 +470,12 @@ const make = (settings: Settings) =>
         return { write, event: made }
       })
 
-    /** An event from a line of text, read by Google, so only on a Google calendar; undone like create. */
+    /** An event from a line of text, as Google reads it; undone like create. */
     const quickAdd = (input: { readonly text: string; readonly calendar?: string }) =>
       Effect.gen(function* adding() {
         const calendar = resolveCalendar(input.calendar)
         if (calendar === null) {
           return yield* Effect.fail(new Error(`No calendar ${input.calendar ?? ""} to write to`))
-        }
-        if (calendar.provider !== "google") {
-          return yield* Effect.fail(
-            new Error(
-              `${calendar.name} isn't a Google calendar: quick add needs one, create works anywhere`,
-            ),
-          )
         }
         let made = yield* google.quickAdd(calendar, input.text)
         // Guests are create's, held for approval: any Google read from the text come off again, unemailed.
@@ -699,12 +514,7 @@ const make = (settings: Settings) =>
         if (guests.length > 0 && input.approved !== true) {
           return yield* hold("update", input, `Change ${before.title}`, guests)
         }
-        const after =
-          calendar.provider === "google"
-            ? yield* google.patch(calendar, before.id, f, guests.length > 0)
-            : yield* mac === null
-                ? Effect.fail(new Error("No Apple calendars here"))
-                : mac.update(calendar, before.id, f)
+        const after = yield* google.patch(calendar, before.id, f, guests.length > 0)
         if (after.id !== before.id) {
           store.put({ ...before, status: "cancelled" })
         }
@@ -738,13 +548,7 @@ const make = (settings: Settings) =>
         if (guests.length > 0 && input.approved !== true) {
           return yield* hold("cancel", input, `Cancel ${before.title}`, guests)
         }
-        if (calendar.provider === "google") {
-          yield* google.remove(calendar, before.id, guests.length > 0)
-        } else if (mac === null) {
-          return yield* Effect.fail(new Error("No Apple calendars here"))
-        } else {
-          yield* mac.remove(calendar, before.id)
-        }
+        yield* google.remove(calendar, before.id, guests.length > 0)
         const write = yield* logged(
           input.undoes === undefined ? "cancel" : "undo",
           calendar,
@@ -765,8 +569,8 @@ const make = (settings: Settings) =>
       Effect.gen(function* responding() {
         const before = yield* find(input.id)
         const calendar = calendarOf(before.calendar)
-        if (calendar === null || calendar.provider !== "google") {
-          return yield* Effect.fail(new Error("Only Google invites can be answered from here"))
+        if (calendar === null) {
+          return yield* Effect.fail(new Error("Its calendar is gone"))
         }
         if (before.response === null) {
           return yield* Effect.fail(new Error("He isn't invited to it"))
@@ -811,30 +615,15 @@ const make = (settings: Settings) =>
         }
         if (w.before !== null && w.after === null) {
           const b = w.before
-          if (calendar.provider === "google") {
-            // Google keeps a cancelled event: confirming it brings it back as it was.
-            const after = yield* google.patch(
-              calendar,
-              b.id,
-              { status: "confirmed" },
-              others(b).length > 0,
-            )
-            const write = yield* logged("undo", calendar, b, after, w.id)
-            return { write, event: after }
-          }
-          return yield* create({
-            calendar: calendar.id,
-            fields: {
-              title: b.title,
-              start: b.start,
-              end: b.end,
-              allDay: b.allDay,
-              location: b.location,
-              notes: b.notes,
-              busy: b.busy,
-            },
-            undoes: w.id,
-          })
+          // Google keeps a cancelled event: confirming it brings it back as it was.
+          const after = yield* google.patch(
+            calendar,
+            b.id,
+            { status: "confirmed" },
+            others(b).length > 0,
+          )
+          const write = yield* logged("undo", calendar, b, after, w.id)
+          return { write, event: after }
         }
         if (w.before !== null && w.after !== null) {
           const b = w.before
@@ -904,41 +693,6 @@ const make = (settings: Settings) =>
       return slots.slice(0, input.count)
     }
 
-    /** A prep block before a meeting: the latest free stretch in the hours before it. */
-    const prep = (input: {
-      readonly id: string
-      readonly minutes: number
-      readonly calendar?: string
-    }) =>
-      Effect.gen(function* prepping() {
-        const e = yield* find(input.id)
-        const from = Math.max(Date.now(), e.start - 6 * HOUR)
-        const slots = free({
-          from,
-          to: e.start,
-          minutes: input.minutes,
-          dayStart: 7,
-          dayEnd: 22,
-          weekends: true,
-          buffer: 0,
-          count: 50,
-        })
-        const slot = slots.at(-1)
-        if (slot === undefined) {
-          return yield* Effect.fail(new Error(`No ${input.minutes} free minutes before ${e.title}`))
-        }
-        const end = Math.min(slot.end, e.start)
-        return yield* create({
-          ...(input.calendar === undefined ? {} : { calendar: input.calendar }),
-          fields: {
-            title: `Prep: ${e.title}`,
-            start: end - input.minutes * MINUTE,
-            end,
-            notes: e.notes,
-          },
-        })
-      })
-
     const status = () => ({
       calendars: store.calendars().map((c) => ({
         id: c.id,
@@ -947,9 +701,8 @@ const make = (settings: Settings) =>
         account: c.account,
         writable: c.writable,
         events: store.counts().find((x) => x.calendar === c.id)?.n ?? 0,
-        synced: c.cursor !== null || c.provider === "apple",
+        synced: c.cursor !== null,
       })),
-      apple: appleAccess,
     })
 
     return {
@@ -959,8 +712,6 @@ const make = (settings: Settings) =>
       tick,
       merged,
       conflictsIn,
-      leaving,
-      travel,
       create,
       quickAdd,
       update,
@@ -968,7 +719,6 @@ const make = (settings: Settings) =>
       rsvp,
       undo,
       free,
-      prep,
       status,
       approvedArgs,
       find,

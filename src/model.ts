@@ -46,9 +46,9 @@ export const event = Schema.Struct({
 export type Event = typeof event.Type
 
 export interface Calendar {
-  /** `google:<account>:<id>` or `apple:<id>`. */
+  /** `google:<account>:<id>`. */
   readonly id: string
-  readonly provider: "google" | "apple"
+  readonly provider: "google"
   readonly account: string
   readonly remote: string
   readonly name: string

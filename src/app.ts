@@ -1,6 +1,6 @@
-// Calendar as a spur: every Google and Apple calendar in one, synced both ways. Its tools read,
-// find time and write; its events tell the brain what changed; its widgets are Home's agenda and an
-// event card for chat.
+// Calendar as a spur: every Google calendar in one, synced both ways. Its tools read,
+// find time and write; its events tell the brain what changed; its widgets are an agenda and an event
+// card for chat.
 import { Effect, Schema } from "effect"
 
 import { defineApp, SWITCH_CATALOG, tool } from "spur-kit"
@@ -145,43 +145,6 @@ const conflicts = tool(
       const from = yield* at(input.from, Date.now())
       const to = yield* at(input.to, from + 14 * DAY)
       return { conflicts: c.conflictsIn(from, to).map(([a, b]) => [shown(a), shown(b)]) }
-    }),
-)
-
-const travel = tool(
-  "travel",
-  {
-    description:
-      "Minutes to get somewhere, routed by Apple Maps: from `from` (default: where the user will be before the event, else home) to `to`, or to an event's place with `event`.",
-    readOnly: true,
-    input: Schema.Struct({
-      to: Schema.optionalKey(Schema.String),
-      from: Schema.optionalKey(Schema.String),
-      event: Schema.optionalKey(Schema.String),
-      arrive: Schema.optionalKey(time),
-    }),
-  },
-  (input) =>
-    Effect.gen(function* routing() {
-      const c = yield* Calendars
-      if (input.event !== undefined) {
-        const e = yield* c.find(input.event)
-        const l = yield* c.leaving(e)
-        return {
-          to: e.location,
-          minutes: l.travelMinutes,
-          leaveAt: l.leaveAt === null ? null : iso(l.leaveAt),
-        }
-      }
-      if (input.to === undefined || input.from === undefined) {
-        return yield* Effect.fail(new Error("Give `to` and `from`, or an `event`"))
-      }
-      const arrive = input.arrive === undefined ? null : yield* at(input.arrive, Date.now())
-      const minutes = yield* c.travel(input.from, input.to, arrive)
-      if (minutes === null) {
-        return yield* Effect.fail(new Error("No route"))
-      }
-      return { from: input.from, to: input.to, minutes }
     }),
 )
 
@@ -405,29 +368,6 @@ const writes = tool(
     }),
 )
 
-const prep = tool(
-  "prep",
-  {
-    description:
-      "Block prep time before a meeting that needs it, on the user's own calendar: the latest free stretch of `minutes` (default 30) in the hours before.",
-    input: Schema.Struct({
-      id: Schema.String,
-      minutes: Schema.optionalKey(Schema.Finite),
-      calendar: Schema.optionalKey(Schema.String),
-    }),
-  },
-  (input) =>
-    Effect.gen(function* prepping() {
-      const c = yield* Calendars
-      const r = yield* c.prep({
-        id: input.id,
-        minutes: input.minutes ?? 30,
-        ...(input.calendar === undefined ? {} : { calendar: input.calendar }),
-      })
-      return "event" in r ? { write: r.write, event: shown(r.event) } : r
-    }),
-)
-
 const sync = tool(
   "sync",
   { description: "Read every calendar for changes now: each calendar with its event count." },
@@ -468,8 +408,7 @@ const row = (e: Event, now: number, conflicted: ReadonlySet<string>) => ({
 const agenda = tool(
   "agenda",
   {
-    description:
-      "Today's events still to come, or the next one if today is done, with when to leave.",
+    description: "Today's events still to come, or the next one if today is done.",
     readOnly: true,
   },
   () =>
@@ -489,20 +428,6 @@ const agenda = tool(
         if (next !== undefined) {
           rows.push(row(next, now, conflicted))
           day = "Next"
-        }
-      }
-      const first = today.find((e) => holds(e) && e.start > now)
-      if (first !== undefined) {
-        const l = yield* c.leaving(first)
-        if (l.leaveAt !== null && l.leaveAt - now < 3 * 3_600_000) {
-          rows.unshift({
-            id: `${first.id}:leave`,
-            time: clock(l.leaveAt),
-            title: `Leave for ${first.title}`,
-            running: l.leaveAt <= now,
-            needsYou: false,
-            conflict: false,
-          })
         }
       }
       // Nothing at all: only the empty word, no heading over it.
@@ -570,14 +495,13 @@ export const calendarApp = defineApp<Calendars>({
     { provider: "google", scopes: [google.SCOPE], multiple: true, legacy: "switch-calendar" },
   ],
   instructions:
-    "Every Google and Apple calendar of the user's in one, synced both ways: the providers hold the truth, writes go to them and each can be undone. Anything that would email someone else (guests, cancellations, RSVP notes) is held as an action item until the user approves.",
+    "Every Google calendar of the user's in one, synced both ways: the providers hold the truth, writes go to them and each can be undone. Anything that would email someone else (guests, cancellations, RSVP notes) is held as an action item until the user approves.",
   tools: [
     list,
     agenda,
     get,
     free,
     conflicts,
-    travel,
     create,
     quickAdd,
     update,
@@ -585,7 +509,6 @@ export const calendarApp = defineApp<Calendars>({
     rsvp,
     undo,
     writes,
-    prep,
     sync,
     status,
   ],

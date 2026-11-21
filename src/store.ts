@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_when ON events (start, end);
 CREATE INDEX IF NOT EXISTS events_calendar ON events (calendar);
 CREATE TABLE IF NOT EXISTS conflicts (pair TEXT PRIMARY KEY, at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS expected (key TEXT PRIMARY KEY, event TEXT NOT NULL, what TEXT NOT NULL, by INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS writes (
   id TEXT PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL, calendar TEXT NOT NULL,
   event TEXT NOT NULL, before TEXT, after TEXT, undoes TEXT, undone_by TEXT);
@@ -35,7 +34,7 @@ const decodeEvent = Schema.decodeUnknownSync(Schema.fromJsonString(event))
 
 interface CalendarRow {
   readonly id: string
-  readonly provider: "google" | "apple"
+  readonly provider: "google"
   readonly account: string
   readonly remote: string
   readonly name: string
@@ -114,6 +113,11 @@ export const openStore = (file: string) => {
   const db = new Database(file, { create: true })
   db.run("PRAGMA journal_mode = WAL")
   db.run(SCHEMA)
+  // Apple's calendars were read once; they're not any more, so what was kept of them goes.
+  db.run(
+    "DELETE FROM events WHERE calendar IN (SELECT id FROM calendars WHERE provider != 'google')",
+  )
+  db.run("DELETE FROM calendars WHERE provider != 'google'")
 
   const calendars = () =>
     db
@@ -249,29 +253,6 @@ export const openStore = (file: string) => {
     db.query("INSERT OR IGNORE INTO conflicts (pair, at) VALUES (?, ?)").run(pair, Date.now())
   }
 
-  const expectedOf = (key: string) =>
-    db
-      .query<{ what: string; by: number }, [string]>("SELECT what, by FROM expected WHERE key = ?")
-      .get(key)
-
-  const expectedFor = (eventId: string) =>
-    db
-      .query<{ key: string; what: string }, [string]>(
-        "SELECT key, what FROM expected WHERE event = ?",
-      )
-      .all(eventId)
-
-  const setExpected = (key: string, eventId: string, what: string, by: number) => {
-    db.query(
-      `INSERT INTO expected (key, event, what, by) VALUES (?, ?, ?, ?)
-       ON CONFLICT (key) DO UPDATE SET what = excluded.what, by = excluded.by`,
-    ).run(key, eventId, what, by)
-  }
-
-  const dropExpected = (key: string) => {
-    db.query("DELETE FROM expected WHERE key = ?").run(key)
-  }
-
   const logWrite = (w: Write) => {
     db.query(
       "INSERT INTO writes (id, at, kind, calendar, event, before, after, undoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -356,10 +337,6 @@ export const openStore = (file: string) => {
     counts,
     conflictSeen,
     addConflict,
-    expectedOf,
-    expectedFor,
-    setExpected,
-    dropExpected,
     logWrite,
     writes,
     write,
