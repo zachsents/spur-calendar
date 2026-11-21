@@ -3,7 +3,7 @@
 // event card for chat.
 import { Effect, Schema } from "effect"
 
-import { defineApp, HOME, SWITCH_CATALOG, tool } from "spur-kit"
+import { defineApp, SWITCH_CATALOG, tool } from "spur-kit"
 import { Calendars } from "./calendars.ts"
 import * as google from "./google.ts"
 import type { Fields } from "./calendars.ts"
@@ -596,7 +596,6 @@ export const calendarApp = defineApp<Calendars>({
       title: "Agenda",
       surfaces: ["space"],
       resource: "ui://calendar/agenda",
-      space: HOME,
       size: {
         aspect: "tall",
         min: { cols: 3, rows: 4 },
